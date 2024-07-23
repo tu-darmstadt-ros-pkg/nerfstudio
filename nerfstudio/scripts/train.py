@@ -57,6 +57,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import tyro
 import yaml
+import sys
 
 from nerfstudio.configs.config_utils import convert_markup_to_ansi
 from nerfstudio.configs.method_configs import AnnotatedBaseConfigUnion
@@ -222,8 +223,7 @@ def launch(
         finally:
             profiler.flush_profiler(config.logging)
 
-
-def main(config: TrainerConfig) -> None:
+def main(config: TrainerConfig):
     """Main function."""
 
     if config.data:
@@ -243,6 +243,7 @@ def main(config: TrainerConfig) -> None:
     # print and save config
     config.print_to_terminal()
     config.save_config()
+    output_dir = config.get_base_dir()
 
     launch(
         main_func=train_loop,
@@ -253,6 +254,7 @@ def main(config: TrainerConfig) -> None:
         dist_url=config.machine.dist_url,
         config=config,
     )
+    return output_dir
 
 
 def entrypoint():

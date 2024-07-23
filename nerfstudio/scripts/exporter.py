@@ -309,9 +309,13 @@ class ExportPoissonMesh(Exporter):
         if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True)
 
-        _, pipeline, _, _ = eval_setup(self.load_config)
+        _, pipeline, path, _ = eval_setup(self.load_config)
 
-        validate_pipeline(self.normal_method, self.normal_output_name, pipeline)
+        loaded_state = torch.load(path, map_location="cpu")
+        #load prompt from sa3d training
+        pipeline.init_prompt = loaded_state["prompt"]
+
+        # validate_pipeline(self.normal_method, self.normal_output_name, pipeline)
 
         # Increase the batchsize to speed up the evaluation.
         assert isinstance(
