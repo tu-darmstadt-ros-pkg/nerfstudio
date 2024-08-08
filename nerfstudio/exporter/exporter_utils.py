@@ -227,7 +227,7 @@ def generate_point_cloud(
         mask = torch.sum(view_directions * normals, dim=-1) > 0
         normals[mask] *= -1
         pcd.normals = o3d.utility.Vector3dVector(normals.double().cpu().numpy())
-    o3d.visualization.draw_geometries([pcd])
+    # o3d.visualization.draw_geometries([pcd])
     return pcd
 
 
