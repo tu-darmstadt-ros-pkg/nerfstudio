@@ -122,9 +122,9 @@ def generate_point_cloud(
     view_directions = []
     total_steps = pipeline.datamanager.len_image_batch
     step = 0
-    max_steps = 50
-    increment = total_steps // max_steps
-
+    # max_steps = 50
+    # increment = total_steps // max_steps
+    increment = 1
     # with progress as progress_bar:
         # task = progress_bar.add_task("Generating Point Cloud", total=num_points)
         # while not progress_bar.finished:
@@ -157,16 +157,12 @@ def generate_point_cloud(
                 torch.min(normal) >= 0.0 and torch.max(normal) <= 1.0
             ), "Normal values from method output must be in [0, 1]"
             normal = (normal * 2.0) - 1.0
-        # import pdb; pdb.set_trace()
         depth_mask = depth.cpu().numpy()
         depth_mask = depth_mask < np.mean(depth_mask)
         point = ray_bundle.origins + ray_bundle.directions * depth
         view_direction = ray_bundle.directions
         #SAM mask out background
-        if step == 0:
-            sam_outputs = pipeline.sam.get_outputs(outputs, init_prompt=pipeline.init_prompt)[0]
-        else:
-            sam_outputs =pipeline.sam.get_outputs(outputs, init_prompt=None)[0]
+        sam_outputs =pipeline.sam.get_outputs(outputs, init_prompt=None)[0]
         # sa3d_mask = outputs['mask_scores'].cpu().numpy() > 0
         # mask =np.squeeze(sa3d_mask, axis=-1)
         mask = np.squeeze(sam_outputs['sam_mask'], axis=-1)
@@ -176,7 +172,7 @@ def generate_point_cloud(
         rgba = rgba[mask]
         if normal is not None:
             normal = normal[mask]
-        # Filter points with opacity lower than 0.5
+        # Filter points with opacity lower than 0.8
         mask = rgba[..., -1] > 0.8
         point = point[mask]
         view_direction = view_direction[mask]
@@ -202,7 +198,7 @@ def generate_point_cloud(
     points = torch.cat(points, dim=0)
     rgbs = torch.cat(rgbs, dim=0)
     view_directions = torch.cat(view_directions, dim=0).cpu()
-
+    normals = torch.cat(normals, dim=0)
     import open3d as o3d
 
     pcd = o3d.geometry.PointCloud()
@@ -212,30 +208,18 @@ def generate_point_cloud(
     ind = None
     if remove_outliers:
         CONSOLE.print("Cleaning Point Cloud")
-        # pcd = pcd.voxel_down_sample(voxel_size=0.02)
-        pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=35, std_ratio=std_ratio)
-        # pcd, ind = pcd.remove_radius_outlier(nb_points=16, radius=0.05)
+        pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=25, std_ratio=std_ratio)
+        
         print("\033[A\033[A")
         CONSOLE.print("[bold green]:white_check_mark: Cleaning Point Cloud")
         if ind is not None:
             view_directions = view_directions[ind]
-
     # either estimate_normals or normal_output_name, not both
-    if estimate_normals:
-        if normal_output_name is not None:
-            CONSOLE.rule("Error", style="red")
-            CONSOLE.print("Cannot estimate normals and use normal_output_name at the same time", justify="center")
-            sys.exit(1)
-        CONSOLE.print("Estimating Point Cloud Normals")
-        pcd.estimate_normals()
-        print("\033[A\033[A")
-        CONSOLE.print("[bold green]:white_check_mark: Estimating Point Cloud Normals")
-    elif normal_output_name is not None:
-        normals = torch.cat(normals, dim=0)
-        if ind is not None:
-            # mask out normals for points that were removed with remove_outliers
-            normals = normals[ind]
-        pcd.normals = o3d.utility.Vector3dVector(normals.double().cpu().numpy())
+    
+    if ind is not None:
+        # mask out normals for points that were removed with remove_outliers
+        normals = normals[ind]
+    pcd.normals = o3d.utility.Vector3dVector(normals.double().cpu().numpy())
 
     # re-orient the normals
     if reorient_normals:
@@ -243,7 +227,7 @@ def generate_point_cloud(
         mask = torch.sum(view_directions * normals, dim=-1) > 0
         normals[mask] *= -1
         pcd.normals = o3d.utility.Vector3dVector(normals.double().cpu().numpy())
-    # o3d.visualization.draw_geometries([pcd])
+    o3d.visualization.draw_geometries([pcd])
     return pcd
 
 

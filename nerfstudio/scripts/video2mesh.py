@@ -73,14 +73,14 @@ def video2mesh(
         preoutput_folder = Path("~/preprocessed_data/").expanduser()
         os.makedirs(preoutput_folder, exist_ok=True)
         CONSOLE.print("loading videos")
-        
+        init_output_folder = output_folder
         for filename in os.listdir(input_folder):
             if filename.endswith(('.MP4', '.AVI', '.MOV', '.MKV')):
                 input_path = Path(os.path.join(input_folder, filename))
                 output_path = Path(os.path.join(preoutput_folder, os.path.splitext(filename)[0]+"/"))
 
                 print(f"Processing {input_path} and saving to {output_path}")
-                # 在这里调用生成网格的函数
+                
                 colmap_generator = VideoToNerfstudioDataset(num_frames_target=150, data=input_path, output_dir = output_path)
                 colmap_generator.main()
                 nerfConfig = TrainerConfig(
@@ -123,12 +123,10 @@ def video2mesh(
                 
                 nerf_dir = trainer.main(nerfConfig)
                 nerf_dir = nerf_dir / "nerfstudio_models"
-                # output_path = Path('/home/zac/preprocessed_data/Fire_extinguisher')
-                # nerf_dir = Path('/home/zac/outputs/Fire_extinguisher/nerfacto/2024-07-23_114040/nerfstudio_models').expanduser()
-                # filename = 'fire_extinguisher'
+
                 sa3d_config = config=SA3DTrainerConfig(
                     method_name="sa3d",
-                    max_num_iterations=200,
+                    max_num_iterations=150,
                     save_only_latest_checkpoint=True,
                     mixed_precision=False,
                     pipeline=SA3DPipelineConfig(
@@ -150,18 +148,16 @@ def video2mesh(
                             remove_mask_floaters=True,
                             camera_optimizer=CameraOptimizerConfig(mode="SO3xR3"),
                             average_init_density=0.01,
-                            # use_lpips=True,
                             predict_normals=True,
                         ),
                         network=SAM3DConfig(
-                            num_prompts=3,
+                            num_prompts=10,
                             neg_lamda=1.0
                         )
                     ),
                     optimizers={
                         "mask_fields": {
                             "optimizer": SGDOptimizerConfig(lr=1e-1),
-                            # "optimizer": AdamOptimizerConfig(lr=1, eps=1e-15),
                             "scheduler": None,
                         },
                     },
@@ -175,8 +171,9 @@ def video2mesh(
                 sa3d_dir = sa3d_dir / "config.yml"
                 output_folder = output_folder.expanduser() / os.path.splitext(filename)[0]
                 os.makedirs(output_folder, exist_ok=True)
-                mesh_generator = ExportPoissonMesh(load_config=sa3d_dir,output_dir=output_folder)
+                mesh_generator = ExportPoissonMesh(load_config=sa3d_dir,output_dir=output_folder, std_ratio=2.0)
                 mesh_generator.main()
+                output_folder = init_output_folder
 
 
 def entrypoint():
