@@ -91,6 +91,7 @@ def generate_point_cloud(
     normal_output_name: Optional[str] = None,
     crop_obb: Optional[OrientedBox] = None,
     std_ratio: float = 10.0,
+    increment: int = 1,
 ) -> o3d.geometry.PointCloud:
     """Generate a point cloud from a nerf.
 
@@ -109,92 +110,90 @@ def generate_point_cloud(
         Point cloud.
     """
 
-    # progress = Progress(
-    #     TextColumn(":cloud: Computing Point Cloud :cloud:"),
-    #     BarColumn(),
-    #     TaskProgressColumn(show_speed=True),
-    #     TimeRemainingColumn(elapsed_when_finished=True, compact=True),
-    #     console=CONSOLE,
-    # )
+    progress = Progress(
+        TextColumn(":cloud: Computing Point Cloud :cloud:"),
+        BarColumn(),
+        TaskProgressColumn(show_speed=True),
+        TimeRemainingColumn(elapsed_when_finished=True, compact=True),
+        console=CONSOLE,
+    )
     points = []
     rgbs = []
     normals = []
     view_directions = []
     total_steps = pipeline.datamanager.len_image_batch
     step = 0
-    # max_steps = 50
-    # increment = total_steps // max_steps
-    increment = 1
-    # with progress as progress_bar:
-        # task = progress_bar.add_task("Generating Point Cloud", total=num_points)
-        # while not progress_bar.finished:
-    while step < total_steps:
-        normal = None
-        with torch.no_grad():
-            ray_bundle, _ = pipeline.datamanager.next_train(step)
-            assert isinstance(ray_bundle, RayBundle)
-            outputs = pipeline.model.get_outputs_for_camera_ray_bundle(ray_bundle)
-        if rgb_output_name not in outputs:
-            CONSOLE.rule("Error", style="red")
-            CONSOLE.print(f"Could not find {rgb_output_name} in the model outputs", justify="center")
-            CONSOLE.print(f"Please set --rgb_output_name to one of: {outputs.keys()}", justify="center")
-            sys.exit(1)
-        if depth_output_name not in outputs:
-            CONSOLE.rule("Error", style="red")
-            CONSOLE.print(f"Could not find {depth_output_name} in the model outputs", justify="center")
-            CONSOLE.print(f"Please set --depth_output_name to one of: {outputs.keys()}", justify="center")
-            sys.exit(1)
-        rgba = pipeline.model.get_rgba_image(outputs, rgb_output_name)
-        depth = outputs[depth_output_name]
-        if normal_output_name is not None:
-            if normal_output_name not in outputs:
+    with progress as progress_bar:
+        task = progress_bar.add_task("Generating Point Cloud", total=total_steps)
+        while not progress_bar.finished:
+            normal = None
+            with torch.no_grad():
+                ray_bundle, _ = pipeline.datamanager.next_train(step)
+                assert isinstance(ray_bundle, RayBundle)
+                outputs = pipeline.model.get_outputs_for_camera_ray_bundle(ray_bundle)
+                sam_outputs =pipeline.sam.get_outputs(outputs, init_prompt=None)[0]
+            if rgb_output_name not in outputs:
                 CONSOLE.rule("Error", style="red")
-                CONSOLE.print(f"Could not find {normal_output_name} in the model outputs", justify="center")
-                CONSOLE.print(f"Please set --normal_output_name to one of: {outputs.keys()}", justify="center")
+                CONSOLE.print(f"Could not find {rgb_output_name} in the model outputs", justify="center")
+                CONSOLE.print(f"Please set --rgb_output_name to one of: {outputs.keys()}", justify="center")
                 sys.exit(1)
-            normal = outputs[normal_output_name]
-            assert (
-                torch.min(normal) >= 0.0 and torch.max(normal) <= 1.0
-            ), "Normal values from method output must be in [0, 1]"
-            normal = (normal * 2.0) - 1.0
-        depth_mask = depth.cpu().numpy()
-        depth_mask = depth_mask < np.mean(depth_mask)
-        point = ray_bundle.origins + ray_bundle.directions * depth
-        view_direction = ray_bundle.directions
-        #SAM mask out background
-        sam_outputs =pipeline.sam.get_outputs(outputs, init_prompt=None)[0]
-        # sa3d_mask = outputs['mask_scores'].cpu().numpy() > 0
-        # mask =np.squeeze(sa3d_mask, axis=-1)
-        mask = np.squeeze(sam_outputs['sam_mask'], axis=-1)
-        mask = mask & np.squeeze(depth_mask, axis=-1)
-        point = point[mask]
-        view_direction = view_direction[mask]
-        rgba = rgba[mask]
-        if normal is not None:
-            normal = normal[mask]
-        # Filter points with opacity lower than 0.8
-        mask = rgba[..., -1] > 0.8
-        point = point[mask]
-        view_direction = view_direction[mask]
-        rgb = rgba[mask][..., :3]
-        if normal is not None:
-            normal = normal[mask]
+            if depth_output_name not in outputs:
+                CONSOLE.rule("Error", style="red")
+                CONSOLE.print(f"Could not find {depth_output_name} in the model outputs", justify="center")
+                CONSOLE.print(f"Please set --depth_output_name to one of: {outputs.keys()}", justify="center")
+                sys.exit(1)
+            rgba = pipeline.model.get_rgba_image(outputs, rgb_output_name)
+            depth = outputs[depth_output_name]
+            if normal_output_name is not None:
+                if normal_output_name not in outputs:
+                    CONSOLE.rule("Error", style="red")
+                    CONSOLE.print(f"Could not find {normal_output_name} in the model outputs", justify="center")
+                    CONSOLE.print(f"Please set --normal_output_name to one of: {outputs.keys()}", justify="center")
+                    sys.exit(1)
+                normal = outputs[normal_output_name]
+                assert (
+                    torch.min(normal) >= 0.0 and torch.max(normal) <= 1.0
+                ), "Normal values from method output must be in [0, 1]"
+                normal = (normal * 2.0) - 1.0
+            point = ray_bundle.origins + ray_bundle.directions * depth
+            view_direction = ray_bundle.directions
+            #SAM mask out background
+            # sa3d_mask = outputs['mask_scores'].cpu().numpy() > 0
+            # mask = np.squeeze(sa3d_mask, axis=-1)
+            # For debuging, showing the mask for each iteration (camera ray)
+            # img = sam_outputs['sam_mask'] * 0.4 + outputs['rgb'].cpu().numpy() * 0.6
+            # import matplotlib.pyplot as plt
+            # plt.imshow(img)
+            # plt.show()
+            mask = np.squeeze(sam_outputs['sam_mask'], axis=-1) != 0
+            point = point[mask]
+            view_direction = view_direction[mask]
+            rgba = rgba[mask]
+            if normal is not None:
+                normal = normal[mask]
+            # Filter points with opacity lower than 0.5
+            mask = rgba[..., -1] > 0.5
+            point = point[mask]
+            view_direction = view_direction[mask]
+            rgb = rgba[mask][..., :3]
+            if normal is not None:
+                normal = normal[mask]
 
-        if crop_obb is not None:
-            mask = crop_obb.within(point)
-        point = point[mask]
-        rgb = rgb[mask]
-        view_direction = view_direction[mask]
-        if normal is not None:
-            normal = normal[mask]
+            if crop_obb is not None:
+                mask = crop_obb.within(point)
+            point = point[mask]
+            rgb = rgb[mask]
+            view_direction = view_direction[mask]
+            if normal is not None:
+                normal = normal[mask]
 
-        points.append(point)
-        rgbs.append(rgb)
-        view_directions.append(view_direction)
-        if normal is not None:
-            normals.append(normal)
-        step += increment
-        print(step)
+            points.append(point)
+            rgbs.append(rgb)
+            view_directions.append(view_direction)
+            if normal is not None:
+                normals.append(normal)
+            step += increment
+            progress.advance(task, increment)
     points = torch.cat(points, dim=0)
     rgbs = torch.cat(rgbs, dim=0)
     view_directions = torch.cat(view_directions, dim=0).cpu()
@@ -204,11 +203,10 @@ def generate_point_cloud(
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points.double().cpu().numpy())
     pcd.colors = o3d.utility.Vector3dVector(rgbs.double().cpu().numpy())
-    
     ind = None
     if remove_outliers:
         CONSOLE.print("Cleaning Point Cloud")
-        pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=25, std_ratio=std_ratio)
+        pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=30, std_ratio=std_ratio)
         
         print("\033[A\033[A")
         CONSOLE.print("[bold green]:white_check_mark: Cleaning Point Cloud")
@@ -228,6 +226,10 @@ def generate_point_cloud(
         normals[mask] *= -1
         pcd.normals = o3d.utility.Vector3dVector(normals.double().cpu().numpy())
     # o3d.visualization.draw_geometries([pcd])
+    # pcd = pcd.voxel_down_sample(voxel_size=0.005)
+    # pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+    #     radius=0.1, max_nn=30))
+    o3d.visualization.draw_geometries([pcd])
     return pcd
 
 

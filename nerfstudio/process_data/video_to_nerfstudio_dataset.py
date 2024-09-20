@@ -48,6 +48,7 @@ class VideoToNerfstudioDataset(ColmapConverterToNerfstudioDataset):
         summary_log = []
         summary_log_eval = []
         # Convert video to images
+        CONSOLE.log(self.camera_type)
         if self.camera_type == "equirectangular":
             # create temp images folder to store the equirect and perspective images
             temp_image_dir = self.output_dir / "temp_images"

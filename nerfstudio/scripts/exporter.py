@@ -302,7 +302,8 @@ class ExportPoissonMesh(Exporter):
     """Target number of faces for the mesh to texture."""
     std_ratio: float = 10.0
     """Threshold based on STD of the average distances across the point cloud to remove outliers."""
-
+    increment: int = 1
+    """Specifies the interval for point sampling across images. A value of '5' means that a point is sampled from every 5th image."""
     def main(self) -> None:
         """Export mesh"""
 
@@ -343,6 +344,7 @@ class ExportPoissonMesh(Exporter):
             normal_output_name=self.normal_output_name if self.normal_method == "model_output" else None,
             crop_obb=crop_obb,
             std_ratio=self.std_ratio,
+            increment=self.increment,
         )
         torch.cuda.empty_cache()
         CONSOLE.print(f"[bold green]:white_check_mark: Generated {pcd}")
@@ -354,7 +356,8 @@ class ExportPoissonMesh(Exporter):
             CONSOLE.print("[bold green]:white_check_mark: Saving Point Cloud")
 
         CONSOLE.print("Computing Mesh... this may take a while.")
-        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
+        #key param depth and densities quantile
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=11)
         vertices_to_remove = densities < np.quantile(densities, 0.1)
         mesh.remove_vertices_by_mask(vertices_to_remove)
         print("\033[A\033[A")
